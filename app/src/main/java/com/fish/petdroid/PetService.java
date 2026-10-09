@@ -305,7 +305,23 @@ public class PetService extends Service {
         return new android.graphics.drawable.BitmapDrawable(getResources(), bm);
     }
 
+    private void logLine(String text) {
+        try {
+            java.io.File f = new java.io.File("/sdcard/Download/Operit/pet_log.txt");
+            if (f.exists() && f.length() > 300 * 1024) {
+                f.delete();
+            }
+            java.io.FileWriter w = new java.io.FileWriter(f, true);
+            String ts = new java.text.SimpleDateFormat("MM-dd HH:mm:ss",
+                    java.util.Locale.US).format(new java.util.Date());
+            w.write(ts + "  " + text + "\n");
+            w.close();
+        } catch (Throwable ignored) {
+        }
+    }
+
     private void say(String text) {
+        logLine(text);
         bubble.setText(text);
         bubble.scrollTo(0, 0);
         bubble.setVisibility(View.VISIBLE);
