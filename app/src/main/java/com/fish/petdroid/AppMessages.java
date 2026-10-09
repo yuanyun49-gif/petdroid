@@ -219,12 +219,19 @@ public class AppMessages {
     }
 
     private static JSONObject load(Context ctx) {
+        JSONObject o = read(new File("/sdcard/Download/Operit/pet_lines.json"));
+        if (o != null) {
+            return o;
+        }
+        File dir = ctx.getExternalFilesDir(null);
+        if (dir != null) {
+            return read(new File(dir, "pet_lines.json"));
+        }
+        return null;
+    }
+
+    private static JSONObject read(File f) {
         try {
-            File dir = ctx.getExternalFilesDir(null);
-            if (dir == null) {
-                return null;
-            }
-            File f = new File(dir, "pet_lines.json");
             if (!f.exists() || f.length() == 0 || f.length() > 512 * 1024) {
                 return null;
             }
