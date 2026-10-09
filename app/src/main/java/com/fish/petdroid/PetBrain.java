@@ -122,6 +122,7 @@ public class PetBrain {
     public static String think(String state) {
         loadCfg();
         if (!enabled) {
+            log("ready=false key=" + key.length());
             return null;
         }
         HttpURLConnection c = null;
@@ -153,14 +154,17 @@ public class PetBrain {
 
             int code = c.getResponseCode();
             if (code < 200 || code >= 300) {
+                log("http " + code);
                 return null;
             }
             JSONObject o = new JSONObject(readStream(c.getInputStream()));
             String text = o.getJSONArray("choices").getJSONObject(0)
                     .getJSONObject("message").optString("content", "");
             text = clean(text);
+            log((text.isEmpty() ? "empty" : "ok " + text));
             return text.isEmpty() ? null : text;
         } catch (Throwable t) {
+            log("err " + t.getClass().getSimpleName() + " " + t.getMessage());
             return null;
         } finally {
             if (c != null) {
@@ -209,5 +213,20 @@ public class PetBrain {
 
     public static void resetPrompt() {
         prompt = "";
+    }
+
+    private static void log(String text) {
+        try {
+            File f = new File("/sdcard/Download/Operit/pet_brain_log.txt");
+            if (f.exists() && f.length() > 200 * 1024) {
+                f.delete();
+            }
+            FileOutputStream out = new FileOutputStream(f, true);
+            String ts = new java.text.SimpleDateFormat("MM-dd HH:mm:ss",
+                    java.util.Locale.US).format(new java.util.Date());
+            out.write((ts + "  " + text + "\n").getBytes(StandardCharsets.UTF_8));
+            out.close();
+        } catch (Throwable ignored) {
+        }
     }
 }
