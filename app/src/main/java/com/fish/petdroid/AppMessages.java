@@ -132,25 +132,26 @@ public class AppMessages {
         });
     }
 
-    public static String next(Context ctx, String pkg, int minutes, int hour, int battery, String avoid) {
+    public static String next(Context ctx, String pkg, int minutes, int hour, int battery,
+                              String avoid, String kind) {
         List<String> pool = new ArrayList<>();
 
         boolean lowBattery = battery > 0 && battery <= 15;
         boolean night = hour >= 1 && hour < 6;
-        boolean longStay = minutes >= 40;
 
-        if (lowBattery) {
-            addAll(pool, LOW_BATTERY, 1);
-        }
-        if (night) {
+        if ("night".equals(kind)) {
             addAll(pool, NIGHT, 1);
-        }
-        if (longStay) {
-            addAll(pool, STAY.get(pkg), 3);
+        } else if ("low".equals(kind)) {
+            addAll(pool, LOW_BATTERY, 1);
+        } else if ("stay".equals(kind)) {
+            addAll(pool, STAY.get(pkg), 1);
         } else {
-            addAll(pool, ARRIVE.get(pkg), 2);
+            addAll(pool, ARRIVE.get(pkg), 1);
         }
-        addAll(pool, ANY, 1);
+
+        if (pool.isEmpty()) {
+            return null;
+        }
 
         JSONObject extra = load(ctx);
         if (extra != null) {
@@ -161,7 +162,7 @@ public class AppMessages {
             if (lowBattery) {
                 addJson(pool, extra, "lowBattery", 1);
             }
-            JSONObject byApp = extra.optJSONObject(longStay ? "stay" : "arrive");
+            JSONObject byApp = extra.optJSONObject("stay".equals(kind) ? "stay" : "arrive");
             if (byApp != null) {
                 addJson(pool, byApp, pkg, 3);
             }
