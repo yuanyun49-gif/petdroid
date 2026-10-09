@@ -240,8 +240,7 @@ public class PetService extends Service {
                         return true;
                     case MotionEvent.ACTION_UP:
                         if (!moved) {
-                            String p = AppMessages.poke(PetService.this);
-                            say(p != null ? p : "别戳我");
+                            pokeBack();
                         }
                         return true;
                     default:
@@ -431,6 +430,42 @@ public class PetService extends Service {
     }
 
     private long lastThinkAt = 0L;
+
+    private long lastPokeThinkAt = 0L;
+
+    private void pokeBack() {
+        if (PetBrain.ready()) {
+            long now = System.currentTimeMillis();
+            if (now - lastPokeThinkAt >= 12000L) {
+                lastPokeThinkAt = now;
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        final String line = PetBrain.think(
+                                "她刚刚用手指戳了你一下，人就看着屏幕。", 7000);
+                        handler.post(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (line != null) {
+                                    PetBrain.remember(line);
+                                    say(line, 0);
+                                } else {
+                                    fallbackPoke();
+                                }
+                            }
+                        });
+                    }
+                }).start();
+                return;
+            }
+        }
+        fallbackPoke();
+    }
+
+    private void fallbackPoke() {
+        String p = AppMessages.poke(this);
+        say(p != null ? p : "别戳我");
+    }
 
     private void utterance(final String kind, final int minutes, final int batt) {
         if (PetBrain.ready()) {
