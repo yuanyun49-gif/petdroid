@@ -16,10 +16,18 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.Drawable;
+import android.graphics.Point;
+import android.hardware.display.DisplayManager;
+import android.hardware.display.VirtualDisplay;
+import android.media.Image;
+import android.media.ImageReader;
+import android.media.projection.MediaProjection;
+import android.media.projection.MediaProjectionManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.util.Base64;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -584,6 +592,125 @@ public class PetService extends Service {
         }
     }
 
+    private static int projResult = 0;
+    private static Intent projData = null;
+
+    public static void setProjection(int result, Intent data) {
+        projResult = result;
+        projData = data;
+    }
+
+    private MediaProjection projection;
+    private ImageReader capReader;
+    private VirtualDisplay capDisplay;
+    private int capW = 0;
+    private int capH = 0;
+
+    private void ensureCapture() {
+        if (projection != null || projData == null) {
+            return;
+        }
+        try {
+            Point size = new Point();
+            WindowManager w = (WindowManager) getSystemService(WINDOW_SERVICE);
+            w.getDefaultDisplay().getRealSize(size);
+            float s = Math.min(1f, 420f / Math.max(1, size.x));
+            capW = Math.max(200, (int) (size.x * s));
+            capH = Math.max(360, (int) (size.y * s));
+            capReader = ImageReader.newInstance(capW, capH, PixelFormat.RGBA_8888, 2);
+            MediaProjectionManager m =
+                    (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
+            projection = m.getMediaProjection(projResult, projData);
+            if (projection == null) {
+                return;
+            }
+            projection.registerCallback(new MediaProjection.Callback() {
+                @Override
+                public void onStop() {
+                    projection = null;
+                }
+            }, handler);
+            capDisplay = projection.createVirtualDisplay("fishcap", capW, capH, 320,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    capReader.getSurface(), null, handler);
+            logLine("录屏接上了 " + capW + "x" + capH);
+        } catch (Throwable t) {
+            projection = null;
+            logLine("录屏失败 " + t.getClass().getSimpleName() + " " + t.getMessage());
+        }
+    }
+
+    private String grabJpeg() {
+        ensureCapture();
+        if (projection == null || capReader == null) {
+            return null;
+        }
+        Image img = null;
+        for (int i = 0; i < 12 && img == null; i++) {
+            img = capReader.acquireLatestImage();
+            if (img == null) {
+                try {
+                    Thread.sleep(150);
+                } catch (InterruptedException ignored) {
+                }
+            }
+        }
+        if (img == null) {
+            return null;
+        }
+        try {
+            Image.Plane p = img.getPlanes()[0];
+            java.nio.ByteBuffer buf = p.getBuffer();
+            int rowStride = p.getRowStride();
+            int pixStride = p.getPixelStride();
+            int w = rowStride / pixStride;
+            Bitmap full = Bitmap.createBitmap(w, capH, Bitmap.Config.ARGB_8888);
+            buf.rewind();
+            full.copyPixelsFromBuffer(buf);
+            Bitmap cut = (w > capW) ? Bitmap.createBitmap(full, 0, 0, capW, capH) : full;
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            cut.compress(Bitmap.CompressFormat.JPEG, 60, bos);
+            return Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP);
+        } catch (Throwable t) {
+            logLine("截图失败 " + t.getClass().getSimpleName());
+            return null;
+        } finally {
+            img.close();
+        }
+    }
+
+    private void watchLook(final int minutes, final int batt) {
+        if (PetBrain.ready()) {
+            long now = System.currentTimeMillis();
+            if (now - lastThinkAt < 90000L) {
+                return;
+            }
+            lastThinkAt = now;
+            final String state = describe("watch", minutes, batt);
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    final String jpeg = grabJpeg();
+                    final String line = (jpeg == null) ? null
+                            : PetBrain.thinkImage(state, jpeg);
+                    handler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (line != null) {
+                                PetBrain.remember(line);
+                                say(line, 0);
+                            } else if (jpeg == null) {
+                                fallback("watch", minutes, batt);
+                            }
+                        }
+                    });
+                }
+            }).start();
+        } else {
+            fallback("watch", minutes, batt);
+        }
+    }
+
     private void checkForeground() {
         refreshWatch();
         checkPush();
@@ -624,10 +751,10 @@ public class PetService extends Service {
             utterance("low", minutes, batt);
         }
 
-        if (watchOn && "com.ss.android.ugc.aweme".equals(currentPkg) && minutes >= 3
-                && System.currentTimeMillis() - lastWatchAt >= 170000L && !quiet()) {
+        if (watchOn && "com.ss.android.ugc.aweme".equals(currentPkg) && minutes >= 2
+                && System.currentTimeMillis() - lastWatchAt >= 120000L && !quiet()) {
             lastWatchAt = System.currentTimeMillis();
-            utterance("watch", minutes, batt);
+            watchLook(minutes, batt);
         }
         if (batt > 0) {
             lastBatt = batt;
