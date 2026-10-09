@@ -430,6 +430,98 @@ public class PetService extends Service {
         }
     }
 
+    private long lastThinkAt = 0L;
+
+    private void utterance(final String kind, final int minutes, final int batt) {
+        if (PetBrain.ready()) {
+            long now = System.currentTimeMillis();
+            if (now - lastThinkAt < 240000L) {
+                return;
+            }
+            lastThinkAt = now;
+            final String state = describe(kind, minutes, batt);
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    final String line = PetBrain.think(state);
+                    handler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (line != null) {
+                                PetBrain.remember(line);
+                                say(line, 0);
+                            } else {
+                                fallback(kind, minutes, batt);
+                            }
+                        }
+                    });
+                }
+            }).start();
+            return;
+        }
+        fallback(kind, minutes, batt);
+    }
+
+    private void fallback(String kind, int minutes, int batt) {
+        String line = AppMessages.next(this, currentPkg, minutes, hourNow(), batt, lastLine, kind);
+        if (line != null) {
+            say(line, 0);
+            lastLine = line;
+        }
+    }
+
+    private String describe(String kind, int minutes, int batt) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("现在时间")
+                .append(new java.text.SimpleDateFormat("HH:mm", java.util.Locale.US)
+                        .format(new java.util.Date()))
+                .append("。");
+        sb.append("她在").append(appName(currentPkg));
+        if (minutes > 0) {
+            sb.append("里待了").append(minutes).append("分钟");
+        }
+        sb.append("。");
+        if (batt > 0) {
+            sb.append("电量").append(batt).append("%。");
+        }
+        if ("arrive".equals(kind)) {
+            sb.append("她刚刚打开这个应用。");
+        } else if ("stay".equals(kind)) {
+            sb.append("她在同一个应用里坐了很久了。");
+        } else if ("night".equals(kind)) {
+            sb.append("现在是深夜。");
+        } else if ("low".equals(kind)) {
+            sb.append("手机快没电了。");
+        }
+        return sb.toString();
+    }
+
+    private String appName(String pkg) {
+        if (pkg == null) {
+            return "手机";
+        }
+        switch (pkg) {
+            case "com.ss.android.ugc.aweme":
+                return "抖音";
+            case "com.netease.dwrg":
+                return "第五人格";
+            case "com.tencent.mm":
+                return "微信";
+            case "com.microsoft.emmx":
+                return "浏览器";
+            case "com.ai.assistance.operit":
+                return "Operit，就是和我聊天的那个界面";
+            case "com.xingin.xhs":
+                return "小红书";
+            case "com.tencent.mobileqq":
+                return "QQ";
+            case "tv.danmaku.bili":
+                return "B站";
+            default:
+                return "一个应用";
+        }
+    }
+
     private void checkForeground() {
         checkPush();
         String top = topPackage();
@@ -444,12 +536,7 @@ public class PetService extends Service {
             enteredAt = System.currentTimeMillis();
             nextStayMark = 15;
             if (!quiet()) {
-                String line = AppMessages.next(this, currentPkg, 0, hourNow(),
-                        batteryPercent(), lastLine, "arrive");
-                if (line != null) {
-                    say(line, 0);
-                    lastLine = line;
-                }
+                utterance("arrive", 0, batteryPercent());
             }
             return;
         }
@@ -459,34 +546,19 @@ public class PetService extends Service {
         int batt = batteryPercent();
 
         if (minutes >= nextStayMark && !quiet()) {
-            String line = AppMessages.next(this, currentPkg, minutes, hourNow(), batt,
-                    lastLine, "stay");
-            if (line != null) {
-                say(line, 0);
-                lastLine = line;
-            }
+            utterance("stay", minutes, batt);
             nextStayMark = nextMark(nextStayMark);
         }
 
         if (lastNightHour != hourNow()) {
             lastNightHour = hourNow();
             if (lastNightHour >= 1 && lastNightHour < 6 && !quiet()) {
-                String line = AppMessages.next(this, currentPkg, minutes, lastNightHour, batt,
-                        lastLine, "night");
-                if (line != null) {
-                    say(line, 0);
-                    lastLine = line;
-                }
+                utterance("night", minutes, batt);
             }
         }
 
         if (batt > 0 && batt <= 15 && lastBatt > 15 && !quiet()) {
-            String line = AppMessages.next(this, currentPkg, minutes, hourNow(), batt,
-                    lastLine, "low");
-            if (line != null) {
-                say(line, 0);
-                lastLine = line;
-            }
+            utterance("low", minutes, batt);
         }
         if (batt > 0) {
             lastBatt = batt;
