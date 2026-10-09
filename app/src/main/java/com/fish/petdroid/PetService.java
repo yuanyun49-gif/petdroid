@@ -470,7 +470,7 @@ public class PetService extends Service {
     private void utterance(final String kind, final int minutes, final int batt) {
         if (PetBrain.ready()) {
             long now = System.currentTimeMillis();
-            if (now - lastThinkAt < 240000L) {
+            if (now - lastThinkAt < ("watch".equals(kind) ? 170000L : 240000L)) {
                 return;
             }
             lastThinkAt = now;
@@ -527,6 +527,9 @@ public class PetService extends Service {
             sb.append("现在是深夜。");
         } else if ("low".equals(kind)) {
             sb.append("手机快没电了。");
+        } else if ("watch".equals(kind)) {
+            sb.append("她正和你一起刷抖音，把你也当成坐在旁边的人。"
+                    + "说一句此刻的想法、吐槽或者短评，二十个字以内，别催她睡觉别催充电。");
         }
         return sb.toString();
     }
@@ -557,7 +560,32 @@ public class PetService extends Service {
         }
     }
 
+    private long lastWatchAt = 0L;
+    private boolean watchOn = false;
+
+    private void refreshWatch() {
+        try {
+            java.io.File f = new java.io.File("/sdcard/Download/Operit/pet_watch.json");
+            if (!f.exists() || f.length() == 0 || f.length() > 8192) {
+                watchOn = false;
+                return;
+            }
+            byte[] buf = new byte[(int) f.length()];
+            java.io.FileInputStream in = new java.io.FileInputStream(f);
+            int n = in.read(buf);
+            in.close();
+            if (n <= 0) {
+                watchOn = false;
+                return;
+            }
+            watchOn = new org.json.JSONObject(new String(buf, 0, n, "UTF-8")).optBoolean("enabled", false);
+        } catch (Throwable ignored) {
+            watchOn = false;
+        }
+    }
+
     private void checkForeground() {
+        refreshWatch();
         checkPush();
         String top = topPackage();
         if (top == null || top.isEmpty()) {
@@ -594,6 +622,12 @@ public class PetService extends Service {
 
         if (batt > 0 && batt <= 15 && lastBatt > 15 && !quiet()) {
             utterance("low", minutes, batt);
+        }
+
+        if (watchOn && "com.ss.android.ugc.aweme".equals(currentPkg) && minutes >= 3
+                && System.currentTimeMillis() - lastWatchAt >= 170000L && !quiet()) {
+            lastWatchAt = System.currentTimeMillis();
+            utterance("watch", minutes, batt);
         }
         if (batt > 0) {
             lastBatt = batt;
