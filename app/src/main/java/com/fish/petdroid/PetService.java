@@ -321,6 +321,11 @@ public class PetService extends Service {
     }
 
     private void say(String text) {
+        say(text, 0);
+    }
+
+    private void say(String text, int bubbleMs) {
+        lastSayAt = System.currentTimeMillis();
         logLine(text);
         bubble.setText(text);
         bubble.scrollTo(0, 0);
@@ -331,7 +336,7 @@ public class PetService extends Service {
         handler.removeCallbacks(hideBubble);
         handler.removeCallbacks(marquee);
         handler.postDelayed(marquee, 800);
-        handler.postDelayed(hideBubble, BUBBLE_MS);
+        handler.postDelayed(hideBubble, bubbleMs > 0 ? bubbleMs : BUBBLE_MS);
     }
 
     private final Runnable hideBubble = new Runnable() {
@@ -349,33 +354,141 @@ public class PetService extends Service {
         }
     };
 
+    private long lastSayAt = 0L;
+    private int lastBatt = -1;
+    private int lastNightHour = -1;
+    private int nextStayMark = 15;
+
+    private boolean quiet() {
+        return System.currentTimeMillis() - lastSayAt < 45000L;
+    }
+
+    private int hourNow() {
+        return java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY);
+    }
+
+    private int nextMark(int m) {
+        if (m < 20) {
+            return 30;
+        }
+        if (m < 30) {
+            return 45;
+        }
+        if (m < 45) {
+            return 60;
+        }
+        if (m < 60) {
+            return 90;
+        }
+        if (m < 90) {
+            return 120;
+        }
+        return m + 60;
+    }
+
+    private void checkPush() {
+        try {
+            java.io.File f = new java.io.File("/sdcard/Download/Operit/pet_now.json");
+            if (!f.exists() || f.length() == 0) {
+                return;
+            }
+            byte[] buf = new byte[(int) f.length()];
+            java.io.FileInputStream in = new java.io.FileInputStream(f);
+            int n = in.read(buf);
+            in.close();
+            if (n <= 0) {
+                return;
+            }
+            org.json.JSONObject o = new org.json.JSONObject(new String(buf, 0, n, "UTF-8"));
+            String line = o.optString("line", "");
+            if (line.isEmpty()) {
+                return;
+            }
+            long now = System.currentTimeMillis();
+            long atMs = now;
+            String at = o.optString("at", "");
+            if (at.indexOf(':') > 0) {
+                String[] hm = at.split(":");
+                java.util.Calendar c = java.util.Calendar.getInstance();
+                c.set(java.util.Calendar.HOUR_OF_DAY, Integer.parseInt(hm[0].trim()));
+                c.set(java.util.Calendar.MINUTE, Integer.parseInt(hm[1].trim()));
+                c.set(java.util.Calendar.SECOND, 0);
+                atMs = c.getTimeInMillis();
+            }
+            int expire = o.optInt("expire_minutes", 10);
+            if (now > atMs + expire * 60000L) {
+                f.delete();
+                return;
+            }
+            if (now < atMs - 2000L) {
+                return;
+            }
+            say(line, o.optInt("bubble_seconds", 0) * 1000);
+            f.delete();
+        } catch (Throwable ignored) {
+        }
+    }
+
     private void checkForeground() {
+        checkPush();
         String top = topPackage();
         if (top == null || top.isEmpty()) {
             return;
         }
-        if (!top.equals(currentPkg)) {
-            currentPkg = top;
-            messageIndex = 0;
-            enteredAt = System.currentTimeMillis();
+        if (getPackageName().equals(top)) {
             return;
         }
-        if (getPackageName().equals(currentPkg)) {
+        if (!top.equals(currentPkg)) {
+            currentPkg = top;
+            enteredAt = System.currentTimeMillis();
+            nextStayMark = 15;
+            if (!quiet()) {
+                String line = AppMessages.next(this, currentPkg, 0, hourNow(),
+                        batteryPercent(), lastLine, "arrive");
+                if (line != null) {
+                    say(line, 0);
+                    lastLine = line;
+                }
+            }
             return;
         }
 
         long stayed = System.currentTimeMillis() - enteredAt;
-        long trigger = 8000L + (long) messageIndex * 20000L;
-        if (stayed < trigger) {
-            return;
-        }
         int minutes = (int) (stayed / 60000L);
-        int hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY);
-        String line = AppMessages.next(this, currentPkg, minutes, hour, batteryPercent(), lastLine);
-        if (line != null) {
-            say(line);
-            lastLine = line;
-            messageIndex++;
+        int batt = batteryPercent();
+
+        if (minutes >= nextStayMark && !quiet()) {
+            String line = AppMessages.next(this, currentPkg, minutes, hourNow(), batt,
+                    lastLine, "stay");
+            if (line != null) {
+                say(line, 0);
+                lastLine = line;
+            }
+            nextStayMark = nextMark(nextStayMark);
+        }
+
+        if (lastNightHour != hourNow()) {
+            lastNightHour = hourNow();
+            if (lastNightHour >= 1 && lastNightHour < 6 && !quiet()) {
+                String line = AppMessages.next(this, currentPkg, minutes, lastNightHour, batt,
+                        lastLine, "night");
+                if (line != null) {
+                    say(line, 0);
+                    lastLine = line;
+                }
+            }
+        }
+
+        if (batt > 0 && batt <= 15 && lastBatt > 15 && !quiet()) {
+            String line = AppMessages.next(this, currentPkg, minutes, hourNow(), batt,
+                    lastLine, "low");
+            if (line != null) {
+                say(line, 0);
+                lastLine = line;
+            }
+        }
+        if (batt > 0) {
+            lastBatt = batt;
         }
     }
 
