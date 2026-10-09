@@ -53,6 +53,7 @@ public class PetService extends Service {
     private String currentPkg = "";
     private int messageIndex = 0;
     private long enteredAt = 0L;
+    private String lastLine = "";
 
     private final Runnable tick = new Runnable() {
         @Override
@@ -267,21 +268,39 @@ public class PetService extends Service {
             enteredAt = System.currentTimeMillis();
             return;
         }
-
-        String[] lines = AppMessages.of(currentPkg);
-        if (lines == null || lines.length == 0) {
-            return;
-        }
         if (getPackageName().equals(currentPkg)) {
             return;
         }
 
         long stayed = System.currentTimeMillis() - enteredAt;
-        long trigger = 8000L + (long) messageIndex * 30000L;
-        if (stayed >= trigger && messageIndex < lines.length) {
-            say(lines[messageIndex]);
+        long trigger = 8000L + (long) messageIndex * 20000L;
+        if (stayed < trigger) {
+            return;
+        }
+        int minutes = (int) (stayed / 60000L);
+        int hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY);
+        String line = AppMessages.next(this, currentPkg, minutes, hour, batteryPercent(), lastLine);
+        if (line != null) {
+            say(line);
+            lastLine = line;
             messageIndex++;
         }
+    }
+
+    private int batteryPercent() {
+        try {
+            android.content.Intent i = registerReceiver(null,
+                    new android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED));
+            if (i != null) {
+                int lvl = i.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1);
+                int scale = i.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100);
+                if (lvl > 0 && scale > 0) {
+                    return Math.round(lvl * 100f / scale);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return -1;
     }
 
     private String topPackage() {
