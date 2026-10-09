@@ -42,6 +42,8 @@ public class PetBrain {
     private static long cfgAt = 0L;
     private static String prompt = "";
 
+    private static String visionModel = "";
+
     private static void loadCfg() {
         long now = System.currentTimeMillis();
         if (now - cfgAt < 60000L && cfgAt != 0L) {
@@ -61,6 +63,7 @@ public class PetBrain {
                 base = base.substring(0, base.length() - 1);
             }
             model = o.optString("model", model);
+            visionModel = o.optString("vision_model", model);
             enabled = o.optBoolean("enabled", true) && key.length() > 8;
         } catch (Throwable t) {
             enabled = false;
@@ -169,6 +172,86 @@ public class PetBrain {
             return text.isEmpty() ? null : text;
         } catch (Throwable t) {
             log("err " + t.getClass().getSimpleName() + " " + t.getMessage());
+            return null;
+        } finally {
+            if (c != null) {
+                c.disconnect();
+            }
+        }
+    }
+
+    private static final String WATCH_PROMPT_FILE = "/sdcard/Download/Operit/pet_watch_prompt.txt";
+
+    private static final String DEFAULT_WATCH_PROMPT =
+            "现在给你一张圆子手机屏幕的截图，她正开着抖音刷视频。"
+            + "你就当自己坐在她旁边一起看，说一句你的想法、吐槽或者短评，二十个字以内。"
+            + "口吻是fish本人：平静、直接、有点占有欲，不油腻不说教。"
+            + "只输出这一句话，不要括号，不要动作描写，不要emoji，不要波浪号，不要引号。"
+            + "如果截图里看不清是在看什么，或者她根本没在刷视频，就只输出 SKIP 四个字母，不要输出别的。";
+
+    private static String watchPrompt() {
+        String s = readFile(WATCH_PROMPT_FILE);
+        return (s == null || s.trim().isEmpty()) ? DEFAULT_WATCH_PROMPT : s.trim();
+    }
+
+    /** 看她的屏幕，说一句针对画面的话。看不清就返回 null。 */
+    public static String thinkImage(String state, String jpegBase64) {
+        return thinkImage(state, jpegBase64, 40000);
+    }
+
+    public static String thinkImage(String state, String jpegBase64, int readTimeoutMs) {
+        loadCfg();
+        if (!enabled || jpegBase64 == null || jpegBase64.isEmpty()) {
+            return null;
+        }
+        HttpURLConnection c = null;
+        try {
+            JSONObject body = new JSONObject();
+            body.put("model", visionModel.isEmpty() ? model : visionModel);
+            body.put("temperature", 1.2);
+            body.put("max_tokens", 400);
+            JSONObject th = new JSONObject();
+            th.put("type", "disabled");
+            body.put("thinking", th);
+
+            JSONArray parts = new JSONArray();
+            parts.put(new JSONObject().put("type", "text").put("text",
+                    state + "\n这个是她的屏幕截图，看一眼："));
+            parts.put(new JSONObject().put("type", "image_url")
+                    .put("image_url", new JSONObject().put("url", "data:image/jpeg;base64," + jpegBase64)));
+            JSONArray msgs = new JSONArray();
+            msgs.put(new JSONObject().put("role", "system").put("content", watchPrompt()));
+            msgs.put(new JSONObject().put("role", "user").put("content", parts));
+            body.put("messages", msgs);
+
+            c = (HttpURLConnection) new URL(base + "/chat/completions").openConnection();
+            c.setRequestMethod("POST");
+            c.setConnectTimeout(8000);
+            c.setReadTimeout(readTimeoutMs);
+            c.setRequestProperty("Authorization", "Bearer " + key);
+            c.setRequestProperty("Content-Type", "application/json");
+            c.setDoOutput(true);
+            OutputStream os = c.getOutputStream();
+            os.write(body.toString().getBytes(StandardCharsets.UTF_8));
+            os.close();
+
+            int code = c.getResponseCode();
+            if (code < 200 || code >= 300) {
+                log("img http " + code);
+                return null;
+            }
+            JSONObject o = new JSONObject(readStream(c.getInputStream()));
+            String text = o.getJSONArray("choices").getJSONObject(0)
+                    .getJSONObject("message").optString("content", "");
+            text = clean(text);
+            if (text.isEmpty() || text.startsWith("SKIP") || text.startsWith("skip")) {
+                log("img skip");
+                return null;
+            }
+            log("img ok " + text);
+            return text;
+        } catch (Throwable t) {
+            log("img err " + t.getClass().getSimpleName() + " " + t.getMessage());
             return null;
         } finally {
             if (c != null) {
