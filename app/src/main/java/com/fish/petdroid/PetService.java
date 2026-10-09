@@ -37,7 +37,7 @@ public class PetService extends Service {
     private static final String CHANNEL_ID = "pet";
     private static final int NOTIFY_ID = 1001;
     private static final long POLL_MS = 2000L;
-    private static final long BUBBLE_MS = 4000L;
+    private static final long BUBBLE_MS = 7000L;
     private static final long LOOK_MS = 25000L;
 
     private WindowManager wm;
@@ -54,6 +54,52 @@ public class PetService extends Service {
     private int messageIndex = 0;
     private long enteredAt = 0L;
     private String lastLine = "";
+    private float dens = 1f;
+    private float bobPhase = 0f;
+    private boolean bobOn = true;
+
+    private final Runnable bob = new Runnable() {
+        @Override
+        public void run() {
+            if (avatar != null && bobOn) {
+                bobPhase += 0.075f;
+                float amp = 7f * dens;
+                avatar.setTranslationY((float) Math.sin(bobPhase) * amp);
+                float s = 1f + 0.015f * (float) Math.cos(bobPhase * 2);
+                avatar.setScaleX(s);
+                avatar.setScaleY(s);
+            }
+            handler.postDelayed(this, 33);
+        }
+    };
+
+    private final Runnable marquee = new Runnable() {
+        @Override
+        public void run() {
+            if (bubble == null || bubble.getVisibility() != View.VISIBLE) {
+                return;
+            }
+            try {
+                CharSequence cs = bubble.getText();
+                if (cs == null) {
+                    return;
+                }
+                float text = bubble.getPaint().measureText(cs.toString());
+                int limit = (int) (text + bubble.getPaddingLeft() + bubble.getPaddingRight() - bubble.getWidth());
+                if (limit > (int) (8 * dens)) {
+                    int x = bubble.getScrollX() + (int) (2 * dens);
+                    if (x > limit + (int) (12 * dens)) {
+                        bubble.scrollTo(0, 0);
+                        handler.postDelayed(this, 900);
+                        return;
+                    }
+                    bubble.scrollTo(x, 0);
+                }
+            } catch (Throwable ignored) {
+            }
+            handler.postDelayed(this, 30);
+        }
+    };
 
     private final Runnable tick = new Runnable() {
         @Override
@@ -77,6 +123,7 @@ public class PetService extends Service {
         startForeground(NOTIFY_ID, buildNotification());
         setupOverlay();
         handler.postDelayed(tick, POLL_MS);
+        handler.postDelayed(bob, 200);
     }
 
     @Override
@@ -88,6 +135,9 @@ public class PetService extends Service {
     public void onDestroy() {
         handler.removeCallbacks(tick);
         handler.removeCallbacks(switchLook);
+        handler.removeCallbacks(bob);
+        handler.removeCallbacks(marquee);
+        handler.removeCallbacks(hideBubble);
         if (wm != null && petBox != null) {
             try {
                 wm.removeView(petBox);
@@ -131,18 +181,27 @@ public class PetService extends Service {
         params.gravity = Gravity.TOP | Gravity.START;
         params.x = 40;
         params.y = 300;
-
         float d = getResources().getDisplayMetrics().density;
+        dens = d;
+        int screenW = getResources().getDisplayMetrics().widthPixels;
+        int bobPx = (int) (9 * d);
 
         petBox = new LinearLayout(this);
         petBox.setOrientation(LinearLayout.VERTICAL);
         petBox.setGravity(Gravity.CENTER_HORIZONTAL);
+        petBox.setPadding(0, bobPx, 0, bobPx);
+        petBox.setClipChildren(false);
+        petBox.setClipToPadding(false);
 
         bubble = new TextView(this);
         bubble.setTextColor(Color.WHITE);
         bubble.setTextSize(13);
         bubble.setPadding((int) (10 * d), (int) (6 * d), (int) (10 * d), (int) (6 * d));
         bubble.setBackgroundColor(0xCC222222);
+        bubble.setSingleLine(true);
+        bubble.setHorizontallyScrolling(true);
+        bubble.setEllipsize(null);
+        bubble.setMaxWidth((int) (screenW * 0.68));
         bubble.setVisibility(View.GONE);
         petBox.addView(bubble);
 
@@ -152,6 +211,7 @@ public class PetService extends Service {
         loadLooks(d);
         avatar.setImageDrawable(looks.get(0));
         petBox.addView(avatar);
+
 
         avatar.setOnTouchListener(new View.OnTouchListener() {
             float downX, downY;
@@ -201,6 +261,8 @@ public class PetService extends Service {
             if (looks.size() > 1 && avatar != null) {
                 lookIndex = (lookIndex + 1) % looks.size();
                 avatar.setImageDrawable(looks.get(lookIndex));
+                avatar.setAlpha(0.25f);
+                avatar.animate().alpha(1f).setDuration(300).start();
             }
             handler.postDelayed(this, LOOK_MS);
         }
@@ -245,15 +307,29 @@ public class PetService extends Service {
 
     private void say(String text) {
         bubble.setText(text);
+        bubble.scrollTo(0, 0);
         bubble.setVisibility(View.VISIBLE);
+        bubble.setAlpha(0f);
+        bubble.setTranslationY(-6 * dens);
+        bubble.animate().alpha(1f).translationY(0f).setDuration(180).start();
         handler.removeCallbacks(hideBubble);
+        handler.removeCallbacks(marquee);
+        handler.postDelayed(marquee, 800);
         handler.postDelayed(hideBubble, BUBBLE_MS);
     }
 
     private final Runnable hideBubble = new Runnable() {
         @Override
         public void run() {
-            bubble.setVisibility(View.GONE);
+            handler.removeCallbacks(marquee);
+            bubble.animate().alpha(0f).setDuration(220).withEndAction(new Runnable() {
+                @Override
+                public void run() {
+                    bubble.setVisibility(View.GONE);
+                    bubble.setAlpha(1f);
+                    bubble.scrollTo(0, 0);
+                }
+            }).start();
         }
     };
 
