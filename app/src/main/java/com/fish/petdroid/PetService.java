@@ -600,6 +600,10 @@ public class PetService extends Service {
         projData = data;
     }
 
+    public static boolean hasProjection() {
+        return projData != null;
+    }
+
     private MediaProjection projection;
     private ImageReader capReader;
     private VirtualDisplay capDisplay;
