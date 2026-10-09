@@ -4,6 +4,7 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
+import android.app.usage.UsageEvents;
 import android.app.usage.UsageStats;
 import android.app.usage.UsageStatsManager;
 import android.content.Context;
@@ -253,18 +254,43 @@ public class PetService extends Service {
             return null;
         }
         long now = System.currentTimeMillis();
-        List<UsageStats> list = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, now - 60_000L, now);
-        if (list == null || list.isEmpty()) {
-            return null;
-        }
+        long begin = now - 3600_000L;
+
         String best = null;
         long bestTime = 0L;
-        for (UsageStats s : list) {
-            if (s.getLastTimeUsed() > bestTime) {
-                bestTime = s.getLastTimeUsed();
-                best = s.getPackageName();
+
+        List<UsageStats> list = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, begin, now);
+        if (list != null) {
+            for (UsageStats s : list) {
+                if (s.getLastTimeUsed() > bestTime) {
+                    bestTime = s.getLastTimeUsed();
+                    best = s.getPackageName();
+                }
             }
         }
+
+        if (best == null) {
+            try {
+                UsageEvents events = usm.queryEvents(begin, now);
+                if (events != null) {
+                    UsageEvents.Event e = new UsageEvents.Event();
+                    long t = 0L;
+                    while (events.hasNextEvent()) {
+                        events.getNextEvent(e);
+                        if (e.getEventType() == UsageEvents.Event.MOVE_TO_FOREGROUND
+                                || e.getEventType() == 1) {
+                            if (e.getTimeStamp() > t) {
+                                t = e.getTimeStamp();
+                                best = e.getPackageName();
+                            }
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+
+        android.util.Log.d("PetDroid", "top=" + best);
         return best;
     }
 }
