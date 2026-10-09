@@ -120,6 +120,10 @@ public class PetBrain {
     }
 
     public static String think(String state) {
+        return think(state, 30000);
+    }
+
+    public static String think(String state, int readTimeoutMs) {
         loadCfg();
         if (!enabled) {
             log("ready=false key=" + key.length());
@@ -144,7 +148,7 @@ public class PetBrain {
             c = (HttpURLConnection) new URL(base + "/chat/completions").openConnection();
             c.setRequestMethod("POST");
             c.setConnectTimeout(8000);
-            c.setReadTimeout(30000);
+            c.setReadTimeout(readTimeoutMs);
             c.setRequestProperty("Authorization", "Bearer " + key);
             c.setRequestProperty("Content-Type", "application/json");
             c.setDoOutput(true);
