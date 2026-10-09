@@ -53,6 +53,15 @@ public class MainActivity extends Activity {
         }, d));
 
         setContentView(root);
+        try {
+            Intent i = new Intent(this, PetService.class);
+            if (Build.VERSION.SDK_INT >= 26) {
+                startForegroundService(i);
+            } else {
+                startService(i);
+            }
+        } catch (Throwable ignored) {
+        }
     }
 
     private Button button(String label, View.OnClickListener l, float d) {
