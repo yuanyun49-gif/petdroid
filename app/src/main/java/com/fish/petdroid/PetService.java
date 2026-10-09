@@ -38,6 +38,7 @@ public class PetService extends Service {
     private static final int NOTIFY_ID = 1001;
     private static final long POLL_MS = 2000L;
     private static final long BUBBLE_MS = 4000L;
+    private static final long LOOK_MS = 25000L;
 
     private WindowManager wm;
     private LinearLayout petBox;
@@ -46,6 +47,8 @@ public class PetService extends Service {
     private WindowManager.LayoutParams params;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final java.util.List<Drawable> looks = new java.util.ArrayList<>();
+    private int lookIndex = 0;
 
     private String currentPkg = "";
     private int messageIndex = 0;
@@ -144,7 +147,8 @@ public class PetService extends Service {
         avatar = new ImageView(this);
         int size = (int) (96 * d);
         avatar.setLayoutParams(new LinearLayout.LayoutParams(size, size));
-        avatar.setImageDrawable(loadPetDrawable(d));
+        loadLooks(d);
+        avatar.setImageDrawable(looks.get(0));
         petBox.addView(avatar);
 
         avatar.setOnTouchListener(new View.OnTouchListener() {
