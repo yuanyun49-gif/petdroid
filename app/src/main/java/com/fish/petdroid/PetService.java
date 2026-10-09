@@ -240,7 +240,8 @@ public class PetService extends Service {
                         return true;
                     case MotionEvent.ACTION_UP:
                         if (!moved) {
-                            say("别戳我");
+                            String p = AppMessages.poke(PetService.this);
+                            say(p != null ? p : "别戳我");
                         }
                         return true;
                     default:
