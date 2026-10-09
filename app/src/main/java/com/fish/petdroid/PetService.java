@@ -86,6 +86,7 @@ public class PetService extends Service {
     @Override
     public void onDestroy() {
         handler.removeCallbacks(tick);
+        handler.removeCallbacks(switchLook);
         if (wm != null && petBox != null) {
             try {
                 wm.removeView(petBox);
@@ -188,16 +189,47 @@ public class PetService extends Service {
         });
 
         wm.addView(petBox, params);
+        if (looks.size() > 1) {
+            handler.postDelayed(switchLook, LOOK_MS);
+        }
     }
 
-    private Drawable loadPetDrawable(float d) {
-        try (InputStream in = getAssets().open("pet.png")) {
+    private final Runnable switchLook = new Runnable() {
+        @Override
+        public void run() {
+            if (looks.size() > 1 && avatar != null) {
+                lookIndex = (lookIndex + 1) % looks.size();
+                avatar.setImageDrawable(looks.get(lookIndex));
+            }
+            handler.postDelayed(this, LOOK_MS);
+        }
+    };
+
+    private Drawable loadAsset(String name) {
+        try (InputStream in = getAssets().open(name)) {
             Bitmap bm = BitmapFactory.decodeStream(in);
             if (bm != null) {
                 return new android.graphics.drawable.BitmapDrawable(getResources(), bm);
             }
         } catch (Throwable ignored) {
         }
+        return null;
+    }
+
+    private void loadLooks(float d) {
+        looks.clear();
+        for (int i = 1; i <= 6; i++) {
+            Drawable dr = loadAsset(i == 1 ? "pet.png" : "pet" + i + ".png");
+            if (dr != null) {
+                looks.add(dr);
+            }
+        }
+        if (looks.isEmpty()) {
+            looks.add(fallbackCircle(d));
+        }
+    }
+
+    private Drawable fallbackCircle(float d) {
         int size = (int) (96 * d);
         Bitmap bm = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(bm);
