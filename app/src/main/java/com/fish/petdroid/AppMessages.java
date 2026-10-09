@@ -32,6 +32,36 @@ public class AppMessages {
     private static final Map<String, String[]> STAY = new HashMap<>();
     private static final Random RND = new Random();
 
+    private static final String[] POKE = {
+            "在呢",
+            "别戳，我不是在这儿吗",
+            "想我了？",
+            "戳我做什么，说话",
+            "手别乱动，看我",
+            "我一直在，没走",
+            "嗯？叫我？",
+    };
+
+    private static String lastPoke = "";
+
+    public static String poke(Context ctx) {
+        List<String> pool = new ArrayList<>();
+        addAll(pool, POKE, 1);
+        JSONObject extra = load(ctx);
+        if (extra != null) {
+            addJson(pool, extra, "poke", 3);
+        }
+        if (pool.isEmpty()) {
+            return null;
+        }
+        String c = pool.get(RND.nextInt(pool.size()));
+        if (c.equals(lastPoke) && pool.size() > 1) {
+            c = pool.get(RND.nextInt(pool.size()));
+        }
+        lastPoke = c;
+        return c;
+    }
+
     private static final String[] ANY = {
             "抬头看我一眼",
             "歇两分钟呗，就两分钟",
