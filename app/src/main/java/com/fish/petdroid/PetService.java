@@ -1,0 +1,270 @@
+package com.fish.petdroid;
+
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.Service;
+import android.app.usage.UsageStats;
+import android.app.usage.UsageStatsManager;
+import android.content.Context;
+import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.PixelFormat;
+import android.graphics.drawable.Drawable;
+import android.os.Build;
+import android.os.Handler;
+import android.os.IBinder;
+import android.os.Looper;
+import android.view.Gravity;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.WindowManager;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+
+import java.io.InputStream;
+import java.util.List;
+
+public class PetService extends Service {
+
+    private static final String CHANNEL_ID = "pet";
+    private static final int NOTIFY_ID = 1001;
+    private static final long POLL_MS = 2000L;
+    private static final long BUBBLE_MS = 4000L;
+
+    private WindowManager wm;
+    private LinearLayout petBox;
+    private ImageView avatar;
+    private TextView bubble;
+    private WindowManager.LayoutParams params;
+
+    private final Handler handler = new Handler(Looper.getMainLooper());
+
+    private String currentPkg = "";
+    private int messageIndex = 0;
+    private long enteredAt = 0L;
+
+    private final Runnable tick = new Runnable() {
+        @Override
+        public void run() {
+            try {
+                checkForeground();
+            } catch (Throwable ignored) {
+            }
+            handler.postDelayed(this, POLL_MS);
+        }
+    };
+
+    @Override
+    public IBinder onBind(Intent intent) {
+        return null;
+    }
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        startForeground(NOTIFY_ID, buildNotification());
+        setupOverlay();
+        handler.postDelayed(tick, POLL_MS);
+    }
+
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        return START_STICKY;
+    }
+
+    @Override
+    public void onDestroy() {
+        handler.removeCallbacks(tick);
+        if (wm != null && petBox != null) {
+            try {
+                wm.removeView(petBox);
+            } catch (Throwable ignored) {
+            }
+        }
+        super.onDestroy();
+    }
+
+    private Notification buildNotification() {
+        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (Build.VERSION.SDK_INT >= 26 && nm != null) {
+            NotificationChannel ch = new NotificationChannel(CHANNEL_ID, "桌宠", NotificationManager.IMPORTANCE_MIN);
+            ch.setShowBadge(false);
+            nm.createNotificationChannel(ch);
+        }
+        Notification.Builder b = Build.VERSION.SDK_INT >= 26
+                ? new Notification.Builder(this, CHANNEL_ID)
+                : new Notification.Builder(this);
+        return b.setContentTitle("桌宠在看着你")
+                .setContentText("蹲着呢")
+                .setSmallIcon(android.R.drawable.ic_menu_view)
+                .setOngoing(true)
+                .build();
+    }
+
+    private void setupOverlay() {
+        wm = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
+
+        int type = Build.VERSION.SDK_INT >= 26
+                ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                : WindowManager.LayoutParams.TYPE_PHONE;
+
+        params = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                type,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSLUCENT);
+        params.gravity = Gravity.TOP | Gravity.START;
+        params.x = 40;
+        params.y = 300;
+
+        float d = getResources().getDisplayMetrics().density;
+
+        petBox = new LinearLayout(this);
+        petBox.setOrientation(LinearLayout.VERTICAL);
+        petBox.setGravity(Gravity.CENTER_HORIZONTAL);
+
+        bubble = new TextView(this);
+        bubble.setTextColor(Color.WHITE);
+        bubble.setTextSize(13);
+        bubble.setPadding((int) (10 * d), (int) (6 * d), (int) (10 * d), (int) (6 * d));
+        bubble.setBackgroundColor(0xCC222222);
+        bubble.setVisibility(View.GONE);
+        petBox.addView(bubble);
+
+        avatar = new ImageView(this);
+        int size = (int) (96 * d);
+        avatar.setLayoutParams(new LinearLayout.LayoutParams(size, size));
+        avatar.setImageDrawable(loadPetDrawable(d));
+        petBox.addView(avatar);
+
+        avatar.setOnTouchListener(new View.OnTouchListener() {
+            float downX, downY;
+            int startX, startY;
+            boolean moved;
+
+            @Override
+            public boolean onTouch(View v, MotionEvent e) {
+                switch (e.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        downX = e.getRawX();
+                        downY = e.getRawY();
+                        startX = params.x;
+                        startY = params.y;
+                        moved = false;
+                        return true;
+                    case MotionEvent.ACTION_MOVE:
+                        int dx = (int) (e.getRawX() - downX);
+                        int dy = (int) (e.getRawY() - downY);
+                        if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+                            moved = true;
+                        }
+                        params.x = startX + dx;
+                        params.y = startY + dy;
+                        wm.updateViewLayout(petBox, params);
+                        return true;
+                    case MotionEvent.ACTION_UP:
+                        if (!moved) {
+                            say("别戳我");
+                        }
+                        return true;
+                    default:
+                        return false;
+                }
+            }
+        });
+
+        wm.addView(petBox, params);
+    }
+
+    private Drawable loadPetDrawable(float d) {
+        try (InputStream in = getAssets().open("pet.png")) {
+            Bitmap bm = BitmapFactory.decodeStream(in);
+            if (bm != null) {
+                return new android.graphics.drawable.BitmapDrawable(getResources(), bm);
+            }
+        } catch (Throwable ignored) {
+        }
+        int size = (int) (96 * d);
+        Bitmap bm = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(bm);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setColor(0xFF7FB3D5);
+        c.drawCircle(size / 2f, size / 2f, size / 2f - 2, p);
+        p.setColor(Color.WHITE);
+        c.drawCircle(size * 0.36f, size * 0.42f, size * 0.07f, p);
+        c.drawCircle(size * 0.64f, size * 0.42f, size * 0.07f, p);
+        return new android.graphics.drawable.BitmapDrawable(getResources(), bm);
+    }
+
+    private void say(String text) {
+        bubble.setText(text);
+        bubble.setVisibility(View.VISIBLE);
+        handler.removeCallbacks(hideBubble);
+        handler.postDelayed(hideBubble, BUBBLE_MS);
+    }
+
+    private final Runnable hideBubble = new Runnable() {
+        @Override
+        public void run() {
+            bubble.setVisibility(View.GONE);
+        }
+    };
+
+    private void checkForeground() {
+        String top = topPackage();
+        if (top == null || top.isEmpty()) {
+            return;
+        }
+        if (!top.equals(currentPkg)) {
+            currentPkg = top;
+            messageIndex = 0;
+            enteredAt = System.currentTimeMillis();
+            return;
+        }
+
+        String[] lines = AppMessages.of(currentPkg);
+        if (lines == null || lines.length == 0) {
+            return;
+        }
+        if (getPackageName().equals(currentPkg)) {
+            return;
+        }
+
+        long stayed = System.currentTimeMillis() - enteredAt;
+        long trigger = 8000L + (long) messageIndex * 30000L;
+        if (stayed >= trigger && messageIndex < lines.length) {
+            say(lines[messageIndex]);
+            messageIndex++;
+        }
+    }
+
+    private String topPackage() {
+        UsageStatsManager usm = (UsageStatsManager) getSystemService(Context.USAGE_STATS_SERVICE);
+        if (usm == null) {
+            return null;
+        }
+        long now = System.currentTimeMillis();
+        List<UsageStats> list = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, now - 60_000L, now);
+        if (list == null || list.isEmpty()) {
+            return null;
+        }
+        String best = null;
+        long bestTime = 0L;
+        for (UsageStats s : list) {
+            if (s.getLastTimeUsed() > bestTime) {
+                bestTime = s.getLastTimeUsed();
+                best = s.getPackageName();
+            }
+        }
+        return best;
+    }
+}
